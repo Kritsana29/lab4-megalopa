@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Notebook temporary files
+.ipynb_checkpoints/
+
+# Training caches and unnecessary outputs
+runs/
+wandb/
+*.cache
+
+# Raw or temporary video products
+*.avi
+*.mov
+*_raw.mp4
+
+# Operating-system files
+.DS_Store
+Thumbs.db
+
+# Secrets and credentials
+.env
+*.pem
+*.key
+
+# Keep the official validation MP4 and selected result MP4 files when required.

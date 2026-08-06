@@ -1,0 +1,134 @@
+[
+  {
+    "path": ".gitignore",
+    "bytes": 385
+  },
+  {
+    "path": "Lab4_Instruction.docx",
+    "bytes": 41697
+  },
+  {
+    "path": "Lab4_Instruction.pdf",
+    "bytes": 142063
+  },
+  {
+    "path": "Lab4_Marking_Guide.md",
+    "bytes": 1150
+  },
+  {
+    "path": "README.md",
+    "bytes": 1824
+  },
+  {
+    "path": "START_HERE.md",
+    "bytes": 898
+  },
+  {
+    "path": "instructor/.gitkeep",
+    "bytes": 0
+  },
+  {
+    "path": "instructor/FORK_WORKFLOW_SETUP.md",
+    "bytes": 1121
+  },
+  {
+    "path": "instructor/RESET_EXISTING_REPOSITORY.md",
+    "bytes": 1587
+  },
+  {
+    "path": "shared/dataset/README.md",
+    "bytes": 466
+  },
+  {
+    "path": "shared/dataset/images/.gitkeep",
+    "bytes": 0
+  },
+  {
+    "path": "shared/dataset/labels/.gitkeep",
+    "bytes": 0
+  },
+  {
+    "path": "shared/models/.gitkeep",
+    "bytes": 0
+  },
+  {
+    "path": "shared/models/README.md",
+    "bytes": 259
+  },
+  {
+    "path": "shared/notebooks/.gitkeep",
+    "bytes": 0
+  },
+  {
+    "path": "shared/notebooks/Lab4_Session1_Training_Evaluation.ipynb",
+    "bytes": 47930
+  },
+  {
+    "path": "shared/notebooks/Lab4_Session2_Pi5_Deployment_Record.ipynb",
+    "bytes": 15954
+  },
+  {
+    "path": "shared/pi5/.gitkeep",
+    "bytes": 0
+  },
+  {
+    "path": "shared/pi5/README.md",
+    "bytes": 667
+  },
+  {
+    "path": "shared/pi5/__pycache__/check_pi5_environment.cpython-313.pyc",
+    "bytes": 3395
+  },
+  {
+    "path": "shared/pi5/__pycache__/megalopa_detection_usb.cpython-313.pyc",
+    "bytes": 12687
+  },
+  {
+    "path": "shared/pi5/check_pi5_environment.py",
+    "bytes": 1936
+  },
+  {
+    "path": "shared/pi5/megalopa_detection_usb.py",
+    "bytes": 8378
+  },
+  {
+    "path": "shared/pi5/requirements-pi.txt",
+    "bytes": 38
+  },
+  {
+    "path": "shared/validation/README.md",
+    "bytes": 340
+  },
+  {
+    "path": "shared/validation/images/.gitkeep",
+    "bytes": 0
+  },
+  {
+    "path": "shared/validation/videos/.gitkeep",
+    "bytes": 0
+  },
+  {
+    "path": "student_work/README.md",
+    "bytes": 405
+  },
+  {
+    "path": "student_work/models/.gitkeep",
+    "bytes": 0
+  },
+  {
+    "path": "student_work/results/pi5/.gitkeep",
+    "bytes": 0
+  },
+  {
+    "path": "student_work/results/training/.gitkeep",
+    "bytes": 0
+  },
+  {
+    "path": "student_work/results/validation/.gitkeep",
+    "bytes": 0
+  },
+  {
+    "path": "student_work/session_information/.gitkeep",
+    "bytes": 0
+  }
+]
