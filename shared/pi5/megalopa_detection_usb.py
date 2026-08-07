@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Run pretrained or student-trained YOLO detection on images or a USB webcam."""
+"""Run YOLO detection on validation images, validation videos, or a USB webcam."""
 
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import re
 import time
@@ -15,6 +16,10 @@ from ultralytics import YOLO
 
 SUPPORTED_MODELS = {".pt", ".onnx"}
 SUPPORTED_IMAGES = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+SUPPORTED_VIDEOS = {".mp4", ".avi", ".mov", ".mkv", ".m4v", ".webm"}
+
+DEFAULT_DISPLAY_WIDTH = 760
+DEFAULT_DISPLAY_HEIGHT = 420
 
 
 def repository_root() -> Path:
@@ -74,7 +79,7 @@ def choose_model(
         if not baseline_model.is_file():
             raise FileNotFoundError(
                 f"Baseline model not found: {baseline_model}\n"
-                "Confirm that shared/models/yolo26n.pt exists in the cloned fork."
+                "Synchronize the group fork and confirm shared/models/yolo26n.pt exists."
             )
         return baseline_model, "baseline"
 
@@ -107,58 +112,70 @@ def choose_model(
         print("Invalid selection.")
 
 
-def choose_image(
+def choose_indexed_file(
     root: Path,
     source: str | None,
-    image_index: int | None,
-    image_dir: str,
+    selected_index: int | None,
+    directory: str,
+    supported_extensions: set[str],
+    media_name: str,
 ) -> Path:
-    if source and image_index is not None:
-        raise ValueError("Use either --source or --image-index, not both.")
+    if source and selected_index is not None:
+        raise ValueError(f"Use either --source or --{media_name}-index, not both.")
 
     if source:
         path = resolve_path(root, source)
         if not path.is_file():
-            raise FileNotFoundError(f"Image not found: {path}")
+            raise FileNotFoundError(f"{media_name.title()} not found: {path}")
+        if path.suffix.lower() not in supported_extensions:
+            raise ValueError(
+                f"Unsupported {media_name} extension: {path.suffix}. "
+                f"Supported: {sorted(supported_extensions)}"
+            )
         return path
 
-    folder = resolve_path(root, image_dir)
+    folder = resolve_path(root, directory)
     if not folder.is_dir():
-        raise FileNotFoundError(f"Validation image folder not found: {folder}")
+        raise FileNotFoundError(f"Validation {media_name} folder not found: {folder}")
 
-    images = sorted(
+    files = sorted(
         (
             path
             for path in folder.iterdir()
-            if path.is_file() and path.suffix.lower() in SUPPORTED_IMAGES
+            if path.is_file() and path.suffix.lower() in supported_extensions
         ),
         key=lambda path: path.name.lower(),
     )
 
-    if not images:
-        raise FileNotFoundError(f"No supported images found in {folder}")
+    if not files:
+        raise FileNotFoundError(
+            f"No supported validation {media_name} files found in {folder}. "
+            f"Supported: {sorted(supported_extensions)}"
+        )
 
-    print("\nAvailable validation images")
-    for index, path in enumerate(images, start=1):
+    print(f"\nAvailable validation {media_name}s")
+    for index, path in enumerate(files, start=1):
         print(f"[{index}] {path.name}")
 
-    if image_index is None:
+    if selected_index is None:
         while True:
-            raw = input(f"Select image [1-{len(images)}]: ").strip()
+            raw = input(f"Select {media_name} [1-{len(files)}]: ").strip()
             try:
-                image_index = int(raw)
+                selected_index = int(raw)
             except ValueError:
-                image_index = -1
+                selected_index = -1
 
-            if 1 <= image_index <= len(images):
+            if 1 <= selected_index <= len(files):
                 break
             print("Invalid selection.")
 
-    if not 1 <= image_index <= len(images):
-        raise ValueError(f"--image-index must be between 1 and {len(images)}")
+    if not 1 <= selected_index <= len(files):
+        raise ValueError(
+            f"--{media_name}-index must be between 1 and {len(files)}"
+        )
 
-    selected = images[image_index - 1]
-    print("Selected image:", selected.name)
+    selected = files[selected_index - 1]
+    print(f"Selected {media_name}:", selected.name)
     return selected
 
 
@@ -191,7 +208,7 @@ def annotate(
     total = sum(counts.values())
 
     count_text = ", ".join(f"{name}={count}" for name, count in counts.items())
-    count_lines = []
+    count_lines: list[str] = []
     if count_text:
         while len(count_text) > 58:
             split_at = count_text.rfind(", ", 0, 58)
@@ -206,27 +223,109 @@ def annotate(
         f"Mode: {model_role}",
         f"Model: {model_name}",
         f"Total detections: {total}",
-        *[f"Classes: {line}" if index == 0 else f"         {line}"
-          for index, line in enumerate(count_lines)],
+        *[
+            f"Classes: {line}" if index == 0 else f"         {line}"
+            for index, line in enumerate(count_lines)
+        ],
         f"Confidence: {confidence:.2f}",
         f"Latency: {latency_ms:.1f} ms",
-        f"Average FPS: {fps:.2f}",
-        "Q: quit    S: save frame",
+        f"Inference FPS: {fps:.2f}",
+        "Q/Esc: quit    S: save frame",
     ]
 
     y = 28
     for line in lines:
         cv2.putText(
-            frame, line, (12, y), cv2.FONT_HERSHEY_SIMPLEX,
-            0.62, (255, 255, 255), 3, cv2.LINE_AA,
+            frame,
+            line,
+            (12, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.62,
+            (255, 255, 255),
+            3,
+            cv2.LINE_AA,
         )
         cv2.putText(
-            frame, line, (12, y), cv2.FONT_HERSHEY_SIMPLEX,
-            0.62, (0, 0, 0), 1, cv2.LINE_AA,
+            frame,
+            line,
+            (12, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.62,
+            (0, 0, 0),
+            1,
+            cv2.LINE_AA,
         )
         y += 25
 
     return frame, total, dict(counts)
+
+
+def fit_for_display(frame, max_width: int, max_height: int):
+    if max_width <= 0 or max_height <= 0:
+        raise ValueError("Display width and height must be positive.")
+
+    height, width = frame.shape[:2]
+    scale = min(max_width / width, max_height / height, 1.0)
+
+    if scale >= 1.0:
+        return frame
+
+    resized_width = max(1, int(round(width * scale)))
+    resized_height = max(1, int(round(height * scale)))
+    return cv2.resize(
+        frame,
+        (resized_width, resized_height),
+        interpolation=cv2.INTER_AREA,
+    )
+
+
+class PreviewWindow:
+    """A small, movable OpenCV window that keeps GUI events responsive."""
+
+    def __init__(
+        self,
+        title: str,
+        enabled: bool,
+        max_width: int,
+        max_height: int,
+    ) -> None:
+        self.title = title
+        self.enabled = enabled
+        self.max_width = max_width
+        self.max_height = max_height
+        self.initialized = False
+
+    def show(self, frame, delay_ms: int = 1) -> int:
+        if not self.enabled:
+            return -1
+
+        preview = fit_for_display(frame, self.max_width, self.max_height)
+        preview_height, preview_width = preview.shape[:2]
+
+        if not self.initialized:
+            cv2.namedWindow(self.title, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(self.title, preview_width, preview_height)
+            cv2.moveWindow(self.title, 10, 10)
+            self.initialized = True
+
+        cv2.imshow(self.title, preview)
+        key = cv2.waitKey(max(1, delay_ms)) & 0xFF
+
+        try:
+            if cv2.getWindowProperty(self.title, cv2.WND_PROP_VISIBLE) < 1:
+                return ord("q")
+        except cv2.error:
+            pass
+
+        return key
+
+    def close(self) -> None:
+        if self.enabled and self.initialized:
+            try:
+                cv2.destroyWindow(self.title)
+            except cv2.error:
+                pass
+        cv2.waitKey(1)
 
 
 def save_summary(result_dir: Path, name: str, summary: dict) -> Path:
@@ -234,6 +333,62 @@ def save_summary(result_dir: Path, name: str, summary: dict) -> Path:
     path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print("Saved summary:", path)
     return path
+
+
+def open_camera(index: int):
+    capture = cv2.VideoCapture(index, cv2.CAP_V4L2)
+    if not capture.isOpened():
+        capture.release()
+        capture = cv2.VideoCapture(index)
+
+    if not capture.isOpened():
+        raise RuntimeError(f"Unable to open USB webcam index {index}")
+
+    capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    return capture
+
+
+def candidate_camera_indexes(scan_max: int) -> list[int]:
+    indexes = set(range(max(0, scan_max) + 1))
+    for path in Path("/dev").glob("video*"):
+        suffix = path.name.removeprefix("video")
+        if suffix.isdigit():
+            indexes.add(int(suffix))
+    return sorted(indexes)
+
+
+def scan_cameras(scan_max: int) -> int:
+    working: list[int] = []
+    print("Scanning camera indexes. This may take several seconds.\n")
+
+    for index in candidate_camera_indexes(scan_max):
+        capture = cv2.VideoCapture(index, cv2.CAP_V4L2)
+        if not capture.isOpened():
+            capture.release()
+            continue
+
+        ok = False
+        frame = None
+        for _ in range(12):
+            ok, frame = capture.read()
+            if ok and frame is not None and frame.size:
+                break
+
+        if ok and frame is not None:
+            height, width = frame.shape[:2]
+            print(f"Camera index {index}: WORKING ({width}x{height})")
+            working.append(index)
+
+        capture.release()
+
+    print("\nWorking camera indexes:", working or "NONE")
+    if not working:
+        print(
+            "No camera returned a frame. Check the USB connection, power, "
+            "video-group permission, and webcam compatibility."
+        )
+        return 1
+    return 0
 
 
 def run_image(
@@ -245,6 +400,9 @@ def run_image(
     result_dir: Path,
     conf: float,
     imgsz: int,
+    display: bool,
+    display_width: int,
+    display_height: int,
 ) -> int:
     started = time.perf_counter()
     result = model.predict(
@@ -258,7 +416,12 @@ def run_image(
     latency_ms = (time.perf_counter() - started) * 1000.0
     fps = 1000.0 / max(latency_ms, 1e-9)
     frame, total, counts = annotate(
-        result, model_path.name, model_role, conf, latency_ms, fps
+        result,
+        model_path.name,
+        model_role,
+        conf,
+        latency_ms,
+        fps,
     )
 
     stem = safe_stem(source.stem)
@@ -269,11 +432,36 @@ def run_image(
     print("Total detections:", total)
     print("Class counts:", counts)
     print("Latency (ms):", round(latency_ms, 2))
-    print("Saved:", output)
+    print("Saved full-resolution result:", output)
 
-    cv2.imshow(f"Lab 4 - {model_role.title()} Static Detection", frame)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    preview = PreviewWindow(
+        f"Lab 4 - {model_role.title()} Static Detection",
+        enabled=display,
+        max_width=display_width,
+        max_height=display_height,
+    )
+
+    if display:
+        print(
+            "Preview fitted to the Pi display. "
+            "Press Q, Esc, Enter, or Space to close."
+        )
+        try:
+            while True:
+                key = preview.show(frame, delay_ms=50)
+                if key in (
+                    ord("q"),
+                    ord("Q"),
+                    27,
+                    13,
+                    10,
+                    32,
+                ):
+                    break
+        finally:
+            preview.close()
+    else:
+        print("Display disabled; inspect the saved output image.")
 
     save_summary(
         result_dir,
@@ -288,22 +476,221 @@ def run_image(
             "total_detections": total,
             "class_counts": counts,
             "latency_ms": latency_ms,
-            "fps": fps,
+            "inference_fps": fps,
             "output_image": relative_or_absolute(output, root),
+            "preview_enabled": display,
+            "preview_max_width": display_width,
+            "preview_max_height": display_height,
         },
     )
     return 0
 
 
-def open_camera(index: int):
-    capture = cv2.VideoCapture(index, cv2.CAP_V4L2)
-    if not capture.isOpened():
-        capture.release()
-        capture = cv2.VideoCapture(index)
+def create_video_writer(
+    preferred_path: Path,
+    fps: float,
+    frame_size: tuple[int, int],
+):
+    fps = fps if fps > 0 else 25.0
+    writer = cv2.VideoWriter(
+        str(preferred_path),
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        fps,
+        frame_size,
+    )
+    if writer.isOpened():
+        return writer, preferred_path
 
+    writer.release()
+    fallback_path = preferred_path.with_suffix(".avi")
+    writer = cv2.VideoWriter(
+        str(fallback_path),
+        cv2.VideoWriter_fourcc(*"MJPG"),
+        fps,
+        frame_size,
+    )
+    if not writer.isOpened():
+        writer.release()
+        raise RuntimeError("Unable to create MP4 or AVI output video.")
+    return writer, fallback_path
+
+
+def run_video(
+    root: Path,
+    model: YOLO,
+    model_path: Path,
+    model_role: str,
+    source: Path,
+    result_dir: Path,
+    conf: float,
+    imgsz: int,
+    display: bool,
+    display_width: int,
+    display_height: int,
+    max_frames: int,
+) -> int:
+    capture = cv2.VideoCapture(str(source))
     if not capture.isOpened():
-        raise RuntimeError(f"Unable to open USB webcam index {index}")
-    return capture
+        raise RuntimeError(f"Unable to open validation video: {source}")
+
+    source_fps = float(capture.get(cv2.CAP_PROP_FPS))
+    source_fps = source_fps if source_fps > 0 else 25.0
+
+    source_width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+    source_height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    if source_width <= 0 or source_height <= 0:
+        capture.release()
+        raise RuntimeError("Validation video reported an invalid frame size.")
+
+    stem = safe_stem(source.stem)
+    preferred_output = result_dir / f"video_{stem}_annotated.mp4"
+    writer, output_path = create_video_writer(
+        preferred_output,
+        source_fps,
+        (source_width, source_height),
+    )
+
+    preview = PreviewWindow(
+        f"Lab 4 - {model_role.title()} Validation Video",
+        enabled=display,
+        max_width=display_width,
+        max_height=display_height,
+    )
+
+    latencies: deque[float] = deque(maxlen=300)
+    frame_metrics: list[dict] = []
+    detection_totals: list[int] = []
+    frame_count = 0
+    saved_count = 0
+    last_total = 0
+    last_counts: dict[str, int] = {}
+    started = time.perf_counter()
+    stopped_early = False
+
+    print("Processing validation video.")
+    if display:
+        print("Press Q/Esc to stop early or S to save the current annotated frame.")
+
+    try:
+        while True:
+            ok, frame = capture.read()
+            if not ok or frame is None:
+                break
+
+            inference_started = time.perf_counter()
+            result = model.predict(
+                source=frame,
+                conf=conf,
+                imgsz=imgsz,
+                device="cpu",
+                verbose=False,
+            )[0]
+
+            latency_ms = (time.perf_counter() - inference_started) * 1000.0
+            latencies.append(latency_ms)
+            average_latency = sum(latencies) / len(latencies)
+            inference_fps = 1000.0 / max(average_latency, 1e-9)
+
+            annotated, last_total, last_counts = annotate(
+                result,
+                model_path.name,
+                model_role,
+                conf,
+                average_latency,
+                inference_fps,
+            )
+
+            writer.write(annotated)
+            frame_count += 1
+            detection_totals.append(last_total)
+            frame_metrics.append(
+                {
+                    "frame_index": frame_count,
+                    "timestamp_seconds": (frame_count - 1) / source_fps,
+                    "total_detections": last_total,
+                    "latency_ms": latency_ms,
+                    "rolling_inference_fps": inference_fps,
+                    "class_counts": json.dumps(last_counts, sort_keys=True),
+                }
+            )
+
+            key = preview.show(annotated, delay_ms=1)
+            if key in (ord("q"), ord("Q"), 27):
+                stopped_early = True
+                break
+
+            if key in (ord("s"), ord("S")):
+                saved_count += 1
+                snapshot = result_dir / f"video_{stem}_frame_{frame_count:06d}.jpg"
+                if cv2.imwrite(str(snapshot), annotated):
+                    print("Saved:", snapshot)
+
+            if max_frames > 0 and frame_count >= max_frames:
+                stopped_early = True
+                print(f"Stopped at --max-frames={max_frames}.")
+                break
+    finally:
+        capture.release()
+        writer.release()
+        preview.close()
+
+    elapsed = time.perf_counter() - started
+    average_latency = sum(latencies) / len(latencies) if latencies else 0.0
+    inference_fps = 1000.0 / average_latency if average_latency else 0.0
+    end_to_end_fps = frame_count / elapsed if elapsed > 0 else 0.0
+
+    metrics_path = result_dir / f"video_{stem}_frame_metrics.csv"
+    with metrics_path.open("w", newline="", encoding="utf-8") as handle:
+        fieldnames = [
+            "frame_index",
+            "timestamp_seconds",
+            "total_detections",
+            "latency_ms",
+            "rolling_inference_fps",
+            "class_counts",
+        ]
+        writer_csv = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer_csv.writeheader()
+        writer_csv.writerows(frame_metrics)
+
+    mean_detections = (
+        sum(detection_totals) / len(detection_totals)
+        if detection_totals
+        else 0.0
+    )
+    min_detections = min(detection_totals) if detection_totals else 0
+    max_detections = max(detection_totals) if detection_totals else 0
+
+    summary = {
+        "mode": "video",
+        "model_role": model_role,
+        "model": relative_or_absolute(model_path, root),
+        "source": relative_or_absolute(source, root),
+        "confidence": conf,
+        "imgsz": imgsz,
+        "source_fps": source_fps,
+        "source_width": source_width,
+        "source_height": source_height,
+        "frames_processed": frame_count,
+        "stopped_early": stopped_early,
+        "elapsed_seconds": elapsed,
+        "average_latency_ms": average_latency,
+        "inference_fps": inference_fps,
+        "end_to_end_processing_fps": end_to_end_fps,
+        "mean_detections_per_frame": mean_detections,
+        "minimum_detections_per_frame": min_detections,
+        "maximum_detections_per_frame": max_detections,
+        "last_total_detections": last_total,
+        "last_class_counts": last_counts,
+        "saved_frames": saved_count,
+        "output_video": relative_or_absolute(output_path, root),
+        "frame_metrics_csv": relative_or_absolute(metrics_path, root),
+        "preview_enabled": display,
+    }
+
+    save_summary(result_dir, f"video_{stem}_summary.json", summary)
+    print(json.dumps(summary, indent=2))
+    return 0
 
 
 def run_camera(
@@ -315,8 +702,19 @@ def run_camera(
     camera_index: int,
     conf: float,
     imgsz: int,
+    display: bool,
+    display_width: int,
+    display_height: int,
+    max_frames: int,
 ) -> int:
     capture = open_camera(camera_index)
+    preview = PreviewWindow(
+        f"Lab 4 - {model_role.title()} USB Webcam Detection",
+        enabled=display,
+        max_width=display_width,
+        max_height=display_height,
+    )
+
     latencies: deque[float] = deque(maxlen=60)
     frame_count = 0
     saved_count = 0
@@ -324,7 +722,17 @@ def run_camera(
     last_counts: dict[str, int] = {}
     started = time.perf_counter()
 
-    print("USB webcam opened. Press Q to quit or S to save the annotated frame.")
+    if display:
+        print("USB webcam opened. Press Q/Esc to quit or S to save a frame.")
+    else:
+        print(
+            "USB webcam opened with display disabled. "
+            "Use --max-frames to stop automatically."
+        )
+        if max_frames <= 0:
+            raise ValueError(
+                "--no-display with --mode camera requires --max-frames greater than 0."
+            )
 
     try:
         while True:
@@ -344,7 +752,7 @@ def run_camera(
             latency_ms = (time.perf_counter() - inference_started) * 1000.0
             latencies.append(latency_ms)
             average_latency = sum(latencies) / len(latencies)
-            average_fps = 1000.0 / max(average_latency, 1e-9)
+            inference_fps = 1000.0 / max(average_latency, 1e-9)
 
             annotated, last_total, last_counts = annotate(
                 result,
@@ -352,18 +760,13 @@ def run_camera(
                 model_role,
                 conf,
                 average_latency,
-                average_fps,
+                inference_fps,
             )
 
-            cv2.imshow(
-                f"Lab 4 - {model_role.title()} USB Webcam Detection",
-                annotated,
-            )
-
-            key = cv2.waitKey(1) & 0xFF
             frame_count += 1
+            key = preview.show(annotated, delay_ms=1)
 
-            if key in (ord("q"), ord("Q")):
+            if key in (ord("q"), ord("Q"), 27):
                 break
 
             if key in (ord("s"), ord("S")):
@@ -373,13 +776,18 @@ def run_camera(
                     print("Saved:", output)
                 else:
                     print("Unable to save:", output)
+
+            if max_frames > 0 and frame_count >= max_frames:
+                print(f"Stopped at --max-frames={max_frames}.")
+                break
     finally:
         capture.release()
-        cv2.destroyAllWindows()
+        preview.close()
 
     elapsed = time.perf_counter() - started
     average_latency = sum(latencies) / len(latencies) if latencies else 0.0
-    average_fps = 1000.0 / average_latency if average_latency else 0.0
+    inference_fps = 1000.0 / average_latency if average_latency else 0.0
+    end_to_end_fps = frame_count / elapsed if elapsed > 0 else 0.0
 
     summary = {
         "mode": "camera",
@@ -391,11 +799,13 @@ def run_camera(
         "frames_processed": frame_count,
         "elapsed_seconds": elapsed,
         "average_latency_ms": average_latency,
-        "average_fps": average_fps,
+        "inference_fps": inference_fps,
+        "end_to_end_processing_fps": end_to_end_fps,
         "last_total_detections": last_total,
         "last_class_counts": last_counts,
         "saved_frames": saved_count,
         "result_directory": relative_or_absolute(result_dir, root),
+        "preview_enabled": display,
     }
 
     save_summary(result_dir, "live_performance_summary.json", summary)
@@ -405,7 +815,11 @@ def run_camera(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("image", "camera"), default="camera")
+    parser.add_argument(
+        "--mode",
+        choices=("image", "video", "camera"),
+        default="camera",
+    )
     parser.add_argument(
         "--baseline",
         action="store_true",
@@ -417,28 +831,93 @@ def main() -> int:
     )
     parser.add_argument(
         "--source",
-        help="Explicit static-image path when --mode image",
+        help="Explicit image or video path for --mode image or --mode video",
     )
     parser.add_argument(
         "--image-index",
         type=int,
-        help="1-based index in the alphabetically sorted validation-image list",
+        help="1-based index in the sorted validation-image list",
     )
     parser.add_argument(
         "--image-dir",
         default="shared/validation/images",
         help="Validation-image folder relative to the repository root",
     )
+    parser.add_argument(
+        "--video-index",
+        type=int,
+        help="1-based index in the sorted validation-video list",
+    )
+    parser.add_argument(
+        "--video-dir",
+        default="shared/validation/videos",
+        help="Validation-video folder relative to the repository root",
+    )
     parser.add_argument("--camera-index", type=int, default=0)
+    parser.add_argument(
+        "--scan-cameras",
+        action="store_true",
+        help="Scan available /dev/video* indexes and exit without loading a model",
+    )
+    parser.add_argument(
+        "--camera-scan-max",
+        type=int,
+        default=10,
+        help="Also scan integer camera indexes from 0 through this value",
+    )
     parser.add_argument("--confidence", type=float, default=0.25)
     parser.add_argument("--imgsz", type=int, default=640)
+    parser.add_argument(
+        "--display-width",
+        type=int,
+        default=DEFAULT_DISPLAY_WIDTH,
+        help="Maximum preview width; saved outputs retain full resolution",
+    )
+    parser.add_argument(
+        "--display-height",
+        type=int,
+        default=DEFAULT_DISPLAY_HEIGHT,
+        help="Maximum preview height; saved outputs retain full resolution",
+    )
+    parser.add_argument(
+        "--no-display",
+        action="store_true",
+        help="Do not open an OpenCV window; outputs are still saved",
+    )
+    parser.add_argument(
+        "--max-frames",
+        type=int,
+        default=0,
+        help="Stop video or camera mode after this many frames; 0 means no limit",
+    )
     args = parser.parse_args()
+
+    if args.scan_cameras:
+        return scan_cameras(args.camera_scan_max)
 
     if not 0.0 < args.confidence <= 1.0:
         parser.error("--confidence must be in (0, 1]")
 
+    if args.imgsz <= 0:
+        parser.error("--imgsz must be positive")
+
+    if args.display_width <= 0 or args.display_height <= 0:
+        parser.error("--display-width and --display-height must be positive")
+
+    if args.max_frames < 0:
+        parser.error("--max-frames cannot be negative")
+
     if args.baseline and args.model:
         parser.error("Use either --baseline or --model, not both.")
+
+    if args.mode == "camera" and args.source:
+        parser.error("--source is only valid for image or video mode")
+
+    if args.mode != "image" and args.image_index is not None:
+        parser.error("--image-index is only valid with --mode image")
+
+    if args.mode != "video" and args.video_index is not None:
+        parser.error("--video-index is only valid with --mode video")
 
     root, baseline_model, custom_model_dir, result_root = deployment_paths()
 
@@ -460,13 +939,16 @@ def main() -> int:
         print("Result folder:", result_dir)
 
         model = YOLO(str(model_path))
+        display = not args.no_display
 
         if args.mode == "image":
-            source = choose_image(
+            source = choose_indexed_file(
                 root=root,
                 source=args.source,
-                image_index=args.image_index,
-                image_dir=args.image_dir,
+                selected_index=args.image_index,
+                directory=args.image_dir,
+                supported_extensions=SUPPORTED_IMAGES,
+                media_name="image",
             )
             return run_image(
                 root=root,
@@ -477,6 +959,33 @@ def main() -> int:
                 result_dir=result_dir,
                 conf=args.confidence,
                 imgsz=args.imgsz,
+                display=display,
+                display_width=args.display_width,
+                display_height=args.display_height,
+            )
+
+        if args.mode == "video":
+            source = choose_indexed_file(
+                root=root,
+                source=args.source,
+                selected_index=args.video_index,
+                directory=args.video_dir,
+                supported_extensions=SUPPORTED_VIDEOS,
+                media_name="video",
+            )
+            return run_video(
+                root=root,
+                model=model,
+                model_path=model_path,
+                model_role=model_role,
+                source=source,
+                result_dir=result_dir,
+                conf=args.confidence,
+                imgsz=args.imgsz,
+                display=display,
+                display_width=args.display_width,
+                display_height=args.display_height,
+                max_frames=args.max_frames,
             )
 
         return run_camera(
@@ -488,6 +997,10 @@ def main() -> int:
             camera_index=args.camera_index,
             conf=args.confidence,
             imgsz=args.imgsz,
+            display=display,
+            display_width=args.display_width,
+            display_height=args.display_height,
+            max_frames=args.max_frames,
         )
 
     except (FileNotFoundError, RuntimeError, ValueError) as error:
