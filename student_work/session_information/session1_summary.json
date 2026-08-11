@@ -1,0 +1,14 @@
+{
+  "group_members": "Kritsana Pirom",
+  "section": 1,
+  "group": 5,
+  "fork_url": "https://github.com/Kritsana29/lab4-megalopa.git",
+  "github_username_for_push": "Kritsana29",
+  "model_pt": "student_work/models/sec01_group05_megalopa_yolo26n_best.pt",
+  "model_onnx": "student_work/models/sec01_group05_megalopa_yolo26n_best.onnx",
+  "Precision": 0.7979187298137447,
+  "Recall": 0.2532716425257151,
+  "mAP@50": 0.2963725341358562,
+  "mAP@50-95": 0.16381045691227616,
+  "Training time (seconds)": 112.88598539500003
+}
